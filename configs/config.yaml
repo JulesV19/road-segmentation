@@ -5,16 +5,18 @@ data:
   num_workers: 4
   pin_memory: true
   persistent_workers: true          # requires num_workers > 0
+  infer_width: 1024                 # used by inference script
+  infer_height: 512
 
 model:
-  encoder: resnet34
+  encoder: efficientnet-b4
   encoder_weights: imagenet
   num_classes: 8
   in_channels: 3
 
 training:
   epochs: 50
-  batch_size: 16                    # 8 for T4/V100, 16 for A100
+  batch_size: 4                     # 1024x512 uses 4x more VRAM — 4 on A100, 2 on V100/T4
   lr: 3.0e-4
   weight_decay: 1.0e-4
   grad_clip: 1.0
@@ -24,6 +26,9 @@ training:
   ignore_index: 255
   dice_weight: 0.5
   ce_weight: 0.5
+  # Per-class CE weights [void, flat, construction, object, nature, sky, human, vehicle]
+  # Boosting object (idx 3) and human (idx 6) which scored 0.52 and 0.62 mIoU
+  class_weights: [0.0, 1.0, 1.0, 3.0, 1.0, 1.0, 3.0, 1.0]
 
 augmentation:
   random_hflip_p: 0.5

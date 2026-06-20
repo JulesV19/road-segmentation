@@ -27,9 +27,16 @@ class EarlyStopping:
         return self.counter >= self.patience
 
 
-def build_criterion(cfg: dict):
+def build_criterion(cfg: dict, device: str):
     ignore_index = cfg["training"]["ignore_index"]
-    ce = nn.CrossEntropyLoss(ignore_index=ignore_index)
+
+    class_weights = cfg["training"].get("class_weights")
+    weight_tensor = (
+        torch.tensor(class_weights, dtype=torch.float32).to(device)
+        if class_weights else None
+    )
+
+    ce = nn.CrossEntropyLoss(ignore_index=ignore_index, weight=weight_tensor)
     dice = smp.losses.DiceLoss(mode="multiclass", ignore_index=ignore_index)
     w_ce = cfg["training"]["ce_weight"]
     w_dice = cfg["training"]["dice_weight"]
@@ -51,7 +58,7 @@ def train_one_epoch(model, loader, criterion, optimizer, scaler, scheduler, cfg,
         images, masks = images.to(device), masks.to(device)
 
         optimizer.zero_grad()
-        with torch.cuda.amp.autocast(enabled=use_amp):
+        with torch.amp.autocast("cuda", enabled=use_amp):
             logits = model(images)
             loss = criterion(logits, masks)
 
@@ -79,7 +86,7 @@ def validate(model, loader, criterion, cfg, device):
 
     for images, masks in tqdm(loader, desc="  val  ", leave=False):
         images, masks = images.to(device), masks.to(device)
-        with torch.cuda.amp.autocast(enabled=use_amp):
+        with torch.amp.autocast("cuda", enabled=use_amp):
             logits = model(images)
             loss = criterion(logits, masks)
         total_loss += loss.item()
@@ -99,7 +106,7 @@ def train(cfg: dict, resume_from: str | None = None):
 
     train_loader, val_loader = build_loaders(cfg)
     model = build_model(cfg).to(device)
-    criterion = build_criterion(cfg)
+    criterion = build_criterion(cfg, device)
 
     t_cfg = cfg["training"]
     optimizer = torch.optim.AdamW(
@@ -110,7 +117,7 @@ def train(cfg: dict, resume_from: str | None = None):
     scheduler = get_cosine_schedule_with_warmup(
         optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
     )
-    scaler = torch.cuda.amp.GradScaler(enabled=t_cfg["mixed_precision"])
+    scaler = torch.amp.GradScaler("cuda", enabled=t_cfg["mixed_precision"])
     early_stop = EarlyStopping(patience=t_cfg["early_stop_patience"])
 
     start_epoch = 0
