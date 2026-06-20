@@ -1,0 +1,44 @@
+data:
+  root: /content/preprocessed       # override in Colab notebook
+  train_csv: train.csv
+  val_csv: val.csv
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true          # requires num_workers > 0
+
+model:
+  encoder: resnet34
+  encoder_weights: imagenet
+  num_classes: 8
+  in_channels: 3
+
+training:
+  epochs: 50
+  batch_size: 16                    # 8 for T4/V100, 16 for A100
+  lr: 3.0e-4
+  weight_decay: 1.0e-4
+  grad_clip: 1.0
+  warmup_epochs: 5
+  early_stop_patience: 10
+  mixed_precision: true
+  ignore_index: 255
+  dice_weight: 0.5
+  ce_weight: 0.5
+
+augmentation:
+  random_hflip_p: 0.5
+  color_jitter: true
+  color_jitter_brightness: 0.2
+  color_jitter_contrast: 0.2
+  color_jitter_saturation: 0.2
+  color_jitter_hue: 0.1
+
+checkpointing:
+  dir: /content/drive/MyDrive/road_seg_checkpoints
+  save_last: true
+  save_best: true
+  metric: val_miou
+
+logging:
+  log_every_n_steps: 20
+  val_every_n_epochs: 1
