@@ -22,12 +22,10 @@ IGNORE_COLOR = np.array([0, 0, 0], dtype=np.uint8)
 
 def mask_to_rgb(mask: np.ndarray) -> np.ndarray:
     """Convert (H, W) label mask to (H, W, 3) RGB image."""
-    h, w = mask.shape
-    rgb = np.zeros((h, w, 3), dtype=np.uint8)
-    for cls_id, color in enumerate(CLASS_COLORS):
-        rgb[mask == cls_id] = color
-    rgb[mask == 255] = IGNORE_COLOR
-    return rgb
+    # Build a lookup table: index 255 wraps to index 8 (black)
+    lut = np.vstack([CLASS_COLORS, IGNORE_COLOR])   # shape (9, 3)
+    safe = np.where(mask == 255, len(CLASS_COLORS), mask).astype(np.int32)
+    return lut[safe].astype(np.uint8)
 
 
 def save_checkpoint(state: dict, path: str | Path, drive_path: str | Path | None = None):
@@ -67,7 +65,8 @@ def visualize_predictions(
 ):
     """Display a grid of image / GT / prediction triplets."""
     n = min(n, images.shape[0])
-    fig, axes = plt.subplots(n, 3, figsize=(12, 4 * n))
+    # Each column shows a 2:1 image (1024×512), so width >> height per row
+    fig, axes = plt.subplots(n, 3, figsize=(18, 3 * n))
     if n == 1:
         axes = axes[None]
 

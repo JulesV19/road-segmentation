@@ -45,6 +45,8 @@ def main():
     parser.add_argument("--no_comparison", action="store_true",
                         help="Output overlay only instead of side-by-side")
     parser.add_argument("--device",        default=None)
+    parser.add_argument("--encoder",       default=None,
+                        help="Override encoder from config (e.g. resnet34 for old checkpoints)")
     args = parser.parse_args()
 
     device = args.device or auto_device()
@@ -53,9 +55,14 @@ def main():
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
+    if args.encoder:
+        cfg["model"]["encoder"] = args.encoder
+        print(f"Encoder override: {args.encoder}")
+
     if device != "cuda":
         cfg["training"]["mixed_precision"] = False
 
+    print(f"Encoder: {cfg['model']['encoder']}")
     model = build_model(cfg).to(device)
     load_checkpoint(args.checkpoint, model, device=device)
     model.eval()
