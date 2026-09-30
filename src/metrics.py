@@ -5,48 +5,64 @@ NUM_CLASSES = 8
 IGNORE_INDEX = 255
 
 CLASS_NAMES = [
-    "void",         # 0 — should not appear after remapping (all → 255)
-    "flat",         # 1
-    "construction", # 2
-    "object",       # 3
-    "nature",       # 4
-    "sky",          # 5
-    "human",        # 6
-    "vehicle",      # 7
+    "void",         # 0 — output channel only, never a target after remapping (void → 255)
+    "flat",
+    "construction",
+    "object",
+    "nature",
+    "sky",
+    "human",
+    "vehicle",
 ]
 
 
-def compute_miou(
-    preds: torch.Tensor,
-    targets: torch.Tensor,
-    num_classes: int = NUM_CLASSES,
-    ignore_index: int = IGNORE_INDEX,
-) -> tuple[torch.Tensor, list[float]]:
+class SegMetric:
     """
-    Args:
-        preds:   (N, H, W) — argmax of logits (long)
-        targets: (N, H, W) — ground truth labels (long)
-    Returns:
-        mean_iou: scalar tensor
-        per_class_iou: list of floats (only for classes present in targets)
+    Standard (Cityscapes-style) mIoU: a confusion matrix is accumulated over every
+    pixel of the split, and IoU_c = TP / (TP + FP + FN) is computed once at the end.
+
+    This is NOT the same as averaging a per-image or per-batch mIoU, which weights
+    small images/batches equally with large ones and gives non-comparable numbers.
+
+    Class 0 (void) is excluded from the mean: it never appears in targets, but a
+    valid pixel predicted as void still counts as a false negative for its true class.
     """
-    valid = targets != ignore_index
-    preds = preds[valid]
-    targets = targets[valid]
 
-    ious = []
-    per_class = []
-    for cls in range(1, num_classes):  # skip class 0 (void, never present after remapping)
-        pred_c = preds == cls
-        target_c = targets == cls
-        intersection = (pred_c & target_c).sum().float()
-        union = (pred_c | target_c).sum().float()
-        if union == 0:
-            per_class.append(float("nan"))
-            continue
-        iou = intersection / union
-        ious.append(iou)
-        per_class.append(iou.item())
+    def __init__(
+        self,
+        num_classes: int = NUM_CLASSES,
+        ignore_index: int = IGNORE_INDEX,
+        device: str | torch.device = "cpu",
+    ):
+        self.num_classes = num_classes
+        self.ignore_index = ignore_index
+        self.confmat = torch.zeros(num_classes, num_classes, dtype=torch.int64, device=device)
 
-    mean_iou = torch.stack(ious).mean() if ious else torch.tensor(0.0)
-    return mean_iou, per_class
+    @torch.no_grad()
+    def update(self, preds: torch.Tensor, targets: torch.Tensor):
+        """
+        Args:
+            preds:   (N, H, W) — argmax of logits (long)
+            targets: (N, H, W) — ground truth labels (long), ignore_index allowed
+        """
+        valid = targets != self.ignore_index
+        idx = targets[valid] * self.num_classes + preds[valid]
+        self.confmat += torch.bincount(idx, minlength=self.num_classes ** 2).reshape(
+            self.num_classes, self.num_classes
+        )
+
+    def per_class_iou(self) -> list[float]:
+        """IoU for classes 1..num_classes-1 (NaN if a class is absent from preds and targets)."""
+        cm = self.confmat.cpu().double()  # float64 is not supported on MPS
+        tp = cm.diag()
+        union = cm.sum(dim=0) + cm.sum(dim=1) - tp
+        iou = tp / union
+        return iou[1:].tolist()
+
+    def compute(self) -> tuple[float, list[float]]:
+        per_class = self.per_class_iou()
+        return torch.tensor(per_class, dtype=torch.float64).nanmean().item(), per_class
+
+    def pixel_accuracy(self) -> float:
+        cm = self.confmat.cpu().double()  # float64 is not supported on MPS
+        return (cm.diag().sum() / cm.sum()).item()

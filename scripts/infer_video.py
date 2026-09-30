@@ -22,8 +22,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.inference import run_frames
-from src.model import build_model
-from src.utils import load_checkpoint
+from src.model import load_model_for_inference
 
 
 def auto_device() -> str:
@@ -46,7 +45,7 @@ def main():
                         help="Output overlay only instead of side-by-side")
     parser.add_argument("--device",        default=None)
     parser.add_argument("--encoder",       default=None,
-                        help="Override encoder from config (e.g. resnet34 for old checkpoints)")
+                        help="Override encoder (only needed for old checkpoints that do not embed their config)")
     args = parser.parse_args()
 
     device = args.device or auto_device()
@@ -55,17 +54,10 @@ def main():
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
-    if args.encoder:
-        cfg["model"]["encoder"] = args.encoder
-        print(f"Encoder override: {args.encoder}")
-
     if device != "cuda":
         cfg["training"]["mixed_precision"] = False
 
-    print(f"Encoder: {cfg['model']['encoder']}")
-    model = build_model(cfg).to(device)
-    load_checkpoint(args.checkpoint, model, device=device)
-    model.eval()
+    model, _ = load_model_for_inference(args.checkpoint, cfg, device, encoder=args.encoder)
 
     run_frames(
         model,

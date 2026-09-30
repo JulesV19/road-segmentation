@@ -5,7 +5,7 @@ Usage:
     python scripts/preprocess.py \
         --data_root "/path/to/cityscapes" \
         --output_dir "/path/to/preprocessed" \
-        --width 512 --height 256
+        --width 1024 --height 512
 
 Output structure:
     preprocessed/
@@ -86,8 +86,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_root", required=True, help="Root of Cityscapes dataset")
     parser.add_argument("--output_dir", required=True, help="Where to write preprocessed data")
-    parser.add_argument("--width", type=int, default=512)
-    parser.add_argument("--height", type=int, default=256)
+    parser.add_argument("--width", type=int, default=1024)
+    parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--workers", type=int, default=cpu_count())
     args = parser.parse_args()
 

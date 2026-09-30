@@ -1,3 +1,5 @@
+import copy
+import csv
 from pathlib import Path
 
 import segmentation_models_pytorch as smp
@@ -7,9 +9,10 @@ from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
 
 from src.dataset import build_loaders
-from src.metrics import compute_miou
+from src.evaluation import evaluate
+from src.metrics import CLASS_NAMES
 from src.model import build_model
-from src.utils import load_checkpoint, save_checkpoint, visualize_predictions
+from src.utils import load_checkpoint, save_checkpoint, wait_for_checkpoint_copies
 
 
 class EarlyStopping:
@@ -25,6 +28,13 @@ class EarlyStopping:
             return False
         self.counter += 1
         return self.counter >= self.patience
+
+    def state_dict(self) -> dict:
+        return {"counter": self.counter, "best": self.best}
+
+    def load_state_dict(self, state: dict):
+        self.counter = state["counter"]
+        self.best = state["best"]
 
 
 def build_criterion(cfg: dict, device: str):
@@ -77,27 +87,15 @@ def train_one_epoch(model, loader, criterion, optimizer, scaler, scheduler, cfg,
     return total_loss / len(loader)
 
 
-@torch.no_grad()
-def validate(model, loader, criterion, cfg, device):
-    model.eval()
-    total_loss = 0.0
-    all_ious = []
-    use_amp = cfg["training"]["mixed_precision"]
-
-    for images, masks in tqdm(loader, desc="  val  ", leave=False):
-        images, masks = images.to(device), masks.to(device)
-        with torch.amp.autocast("cuda", enabled=use_amp):
-            logits = model(images)
-            loss = criterion(logits, masks)
-        total_loss += loss.item()
-
-        preds = logits.argmax(dim=1)
-        miou, _ = compute_miou(preds, masks, num_classes=cfg["model"]["num_classes"])
-        all_ious.append(miou)
-
-    mean_loss = total_loss / len(loader)
-    mean_miou = torch.stack(all_ious).mean().item()
-    return mean_loss, mean_miou
+def append_history(path: Path, row: dict):
+    """One CSV row per epoch."""
+    new_file = not path.exists()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+        if new_file:
+            writer.writeheader()
+        writer.writerow(row)
 
 
 def train(cfg: dict, resume_from: str | None = None):
@@ -124,11 +122,15 @@ def train(cfg: dict, resume_from: str | None = None):
     best_miou = 0.0
     ckpt_dir = Path(cfg["checkpointing"]["dir"])
     ckpt_dir.mkdir(parents=True, exist_ok=True)
+    history_path = ckpt_dir / "history.csv"
 
     if resume_from:
         print(f"Resuming from {resume_from}")
-        start_epoch, best_miou = load_checkpoint(resume_from, model, optimizer, device)
-        start_epoch += 1
+        ckpt = load_checkpoint(resume_from, model, optimizer, scheduler, scaler, device)
+        start_epoch = ckpt.get("epoch", 0) + 1
+        best_miou = ckpt.get("best_miou", 0.0)
+        if "early_stop" in ckpt:
+            early_stop.load_state_dict(ckpt["early_stop"])
 
     for epoch in range(start_epoch, t_cfg["epochs"]):
         print(f"\nEpoch {epoch + 1}/{t_cfg['epochs']} — best mIoU so far: {best_miou:.4f}")
@@ -136,33 +138,46 @@ def train(cfg: dict, resume_from: str | None = None):
         train_loss = train_one_epoch(
             model, train_loader, criterion, optimizer, scaler, scheduler, cfg, device
         )
-        val_loss, val_miou = validate(model, val_loader, criterion, cfg, device)
+        val = evaluate(model, val_loader, cfg, device, criterion=criterion)
+        val_miou = val["miou"]
 
-        print(f"  train_loss={train_loss:.4f}  val_loss={val_loss:.4f}  val_mIoU={val_miou:.4f}")
+        print(f"  train_loss={train_loss:.4f}  val_loss={val['loss']:.4f}  val_mIoU={val_miou:.4f}")
 
-        # always save last checkpoint to Drive
-        last_state = {
+        is_best = val_miou > best_miou
+        if is_best:
+            best_miou = val_miou
+        stop = early_stop.step(val_miou)
+
+        append_history(history_path, {
+            "epoch": epoch + 1,
+            "lr": scheduler.get_last_lr()[0],
+            "train_loss": train_loss,
+            "val_loss": val["loss"],
+            "val_miou": val_miou,
+            **{f"iou_{name}": val["per_class_iou"][name] for name in CLASS_NAMES[1:]},
+        })
+
+        state = {
             "epoch": epoch,
             "model": model.state_dict(),
             "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "scaler": scaler.state_dict(),
+            "early_stop": early_stop.state_dict(),
             "best_miou": best_miou,
             "val_miou": val_miou,
+            "val_per_class_iou": val["per_class_iou"],
+            "cfg": copy.deepcopy(cfg),
         }
-        local_last = Path("/tmp/last.pth")
-        save_checkpoint(last_state, local_last, drive_path=ckpt_dir / "last.pth")
-
-        if val_miou > best_miou:
-            best_miou = val_miou
-            save_checkpoint(
-                last_state,
-                local_last,
-                drive_path=ckpt_dir / f"best_epoch{epoch + 1:03d}_miou{val_miou:.4f}.pth",
-            )
+        drive_paths = [ckpt_dir / "last.pth"] + ([ckpt_dir / "best.pth"] if is_best else [])
+        save_checkpoint(state, Path("/tmp/last.pth"), drive_paths=drive_paths)
+        if is_best:
             print(f"  *** New best mIoU: {best_miou:.4f} — checkpoint saved ***")
 
-        if early_stop.step(val_miou):
+        if stop:
             print(f"  Early stopping triggered after {epoch + 1} epochs.")
             break
 
+    wait_for_checkpoint_copies()
     print(f"\nTraining complete. Best val mIoU: {best_miou:.4f}")
     return model

@@ -1,0 +1,20 @@
+{
+  "miou": 0.8860748488719578,
+  "per_class_iou": {
+    "flat": 0.9849790961078073,
+    "construction": 0.9216679774659667,
+    "object": 0.6939183817468537,
+    "nature": 0.9196695476759621,
+    "sky": 0.9431016700991833,
+    "human": 0.8114526008607534,
+    "vehicle": 0.9277346681471781
+  },
+  "pixel_acc": 0.9698576369272162,
+  "loss": null,
+  "num_images": 500,
+  "checkpoint": "best_epoch049_miou0.8419.pth",
+  "epoch": 49,
+  "encoder": "efficientnet-b4",
+  "eval_resolution": "1024x512",
+  "metric": "dataset-level mIoU over 7 Cityscapes categories (confusion matrix, void excluded)"
+}

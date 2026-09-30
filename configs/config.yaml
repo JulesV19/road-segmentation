@@ -5,7 +5,7 @@ data:
   num_workers: 4
   pin_memory: true
   persistent_workers: true          # requires num_workers > 0
-  infer_width: 1024                 # used by inference script
+  infer_width: 1024
   infer_height: 512
 
 model:
@@ -16,7 +16,7 @@ model:
 
 training:
   epochs: 50
-  batch_size: 4                     # 1024x512 uses 4x more VRAM — 4 on A100, 2 on V100/T4
+  batch_size: 4                     # 4 on A100, 2 on V100/T4 (set by the notebook)
   lr: 3.0e-4
   weight_decay: 1.0e-4
   grad_clip: 1.0
@@ -27,7 +27,8 @@ training:
   dice_weight: 0.5
   ce_weight: 0.5
   # Per-class CE weights [void, flat, construction, object, nature, sky, human, vehicle]
-  # Boosting object (idx 3) and human (idx 6) which scored 0.52 and 0.62 mIoU
+  # Boosting object (idx 3) and human (idx 6), the weakest classes (0.52 / 0.62 IoU)
+  # in an earlier ResNet34 @ 512x256 run without class weights
   class_weights: [0.0, 1.0, 1.0, 3.0, 1.0, 1.0, 3.0, 1.0]
 
 augmentation:

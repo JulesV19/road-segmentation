@@ -44,7 +44,7 @@ class CityscapesDataset(Dataset):
         augmented = self.transform(image=image, mask=mask)
         image, mask = augmented["image"], augmented["mask"]
 
-        image = TF.to_tensor(image)  # HWC uint8 → CHW float [0,1]
+        image = TF.to_tensor(image)
         image = TF.normalize(image, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         mask = torch.from_numpy(mask).long()
         return image, mask

@@ -36,7 +36,6 @@ def blend_overlay(frame_bgr: np.ndarray, mask_rgb: np.ndarray, alpha: float = 0.
 
 
 def side_by_side(frame_bgr: np.ndarray, blended_bgr: np.ndarray) -> np.ndarray:
-    """Horizontal concat: original | segmentation overlay."""
     return np.concatenate([frame_bgr, blended_bgr], axis=1)
 
 
@@ -60,15 +59,14 @@ def run_frames(
         fps:        output framerate (Cityscapes demo ≈ 17 fps)
     """
     model.eval()
-    width = cfg["data"].get("infer_width", 512)
-    height = cfg["data"].get("infer_height", 256)
+    width = cfg["data"].get("infer_width", 1024)
+    height = cfg["data"].get("infer_height", 512)
     use_amp = cfg["training"].get("mixed_precision", False)
 
     frames = sorted(Path(frames_dir).glob("*.png"))
     if not frames:
         raise FileNotFoundError(f"No PNG files found in {frames_dir}")
 
-    # Determine output size from first frame
     first = cv2.imread(str(frames[0]))
     orig_h, orig_w = first.shape[:2]
     out_w = orig_w * 2 if comparison else orig_w

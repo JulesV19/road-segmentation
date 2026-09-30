@@ -1,58 +1,97 @@
+import shutil
 import threading
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from matplotlib.patches import Patch
 
-# BGR-like palette matching standard Cityscapes color conventions
+# RGB palette matching standard Cityscapes category colors
 CLASS_COLORS = np.array([
-    [0,   0,   0],    # 0  void      — black (should be absent after remapping)
-    [128, 64,  128],  # 1  flat      — purple (road)
-    [70,  70,  70],   # 2  construction — dark grey
-    [153, 153, 153],  # 3  object    — light grey
-    [107, 142, 35],   # 4  nature    — olive green
-    [70,  130, 180],  # 5  sky       — steel blue
-    [220, 20,  60],   # 6  human     — crimson
-    [0,   0,   142],  # 7  vehicle   — dark blue
+    [0,   0,   0],    # void
+    [128, 64,  128],  # flat
+    [70,  70,  70],   # construction
+    [153, 153, 153],  # object
+    [107, 142, 35],   # nature
+    [70,  130, 180],  # sky
+    [220, 20,  60],   # human
+    [0,   0,   142],  # vehicle
 ], dtype=np.uint8)
 
 IGNORE_COLOR = np.array([0, 0, 0], dtype=np.uint8)
 
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
+
 
 def mask_to_rgb(mask: np.ndarray) -> np.ndarray:
     """Convert (H, W) label mask to (H, W, 3) RGB image."""
-    # Build a lookup table: index 255 wraps to index 8 (black)
-    lut = np.vstack([CLASS_COLORS, IGNORE_COLOR])   # shape (9, 3)
+    # index 255 (ignore) is mapped to an extra last row
+    lut = np.vstack([CLASS_COLORS, IGNORE_COLOR])
     safe = np.where(mask == 255, len(CLASS_COLORS), mask).astype(np.int32)
     return lut[safe].astype(np.uint8)
 
 
-def save_checkpoint(state: dict, path: str | Path, drive_path: str | Path | None = None):
+# Background copy to Drive; joined before the next save so a copy never reads
+# a file that is being rewritten.
+_copy_thread: threading.Thread | None = None
+
+
+def wait_for_checkpoint_copies():
+    global _copy_thread
+    if _copy_thread is not None:
+        _copy_thread.join()
+        _copy_thread = None
+
+
+def save_checkpoint(state: dict, path: str | Path, drive_paths: list[str | Path] = ()):
+    """Save `state` to `path` (fast local disk), then copy it to each of `drive_paths` in the background."""
+    global _copy_thread
+    wait_for_checkpoint_copies()
+
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(state, path)
-    if drive_path is not None:
-        # async copy to Drive so training is not blocked
-        def _copy():
-            import shutil
-            drive_path_ = Path(drive_path)
-            drive_path_.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, drive_path_)
-        threading.Thread(target=_copy, daemon=True).start()
+
+    def _copy():
+        for dst in drive_paths:
+            dst = Path(dst)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, dst)
+
+    _copy_thread = threading.Thread(target=_copy)
+    _copy_thread.start()
 
 
 def load_checkpoint(
     path: str | Path,
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer | None = None,
+    scheduler=None,
+    scaler: torch.amp.GradScaler | None = None,
     device: str = "cuda",
-) -> tuple[int, float]:
+) -> dict:
+    """Load weights (and optionally optimizer / scheduler / scaler state). Returns the raw checkpoint dict."""
     ckpt = torch.load(path, map_location=device)
     model.load_state_dict(ckpt["model"])
-    if optimizer and "optimizer" in ckpt:
+    if optimizer is not None and "optimizer" in ckpt:
         optimizer.load_state_dict(ckpt["optimizer"])
-    return ckpt.get("epoch", 0), ckpt.get("best_miou", 0.0)
+    for name, obj in (("scheduler", scheduler), ("scaler", scaler)):
+        if obj is None:
+            continue
+        if name in ckpt:
+            obj.load_state_dict(ckpt[name])
+        else:
+            print(f"  WARNING: checkpoint has no {name} state (old format) — {name} restarts from scratch")
+    return ckpt
+
+
+def denormalize(image: torch.Tensor, mean=IMAGENET_MEAN, std=IMAGENET_STD) -> np.ndarray:
+    """(3, H, W) normalised tensor → (H, W, 3) float image in [0, 1]."""
+    img = image.cpu().numpy()
+    img = img * np.array(std)[:, None, None] + np.array(mean)[:, None, None]
+    return img.clip(0, 1).transpose(1, 2, 0)
 
 
 def visualize_predictions(
@@ -60,33 +99,58 @@ def visualize_predictions(
     targets: torch.Tensor,
     preds: torch.Tensor,
     n: int = 4,
-    denorm_mean=(0.485, 0.456, 0.406),
-    denorm_std=(0.229, 0.224, 0.225),
 ):
     """Display a grid of image / GT / prediction triplets."""
     n = min(n, images.shape[0])
-    # Each column shows a 2:1 image (1024×512), so width >> height per row
     fig, axes = plt.subplots(n, 3, figsize=(18, 3 * n))
     if n == 1:
         axes = axes[None]
 
-    mean = np.array(denorm_mean)[:, None, None]
-    std = np.array(denorm_std)[:, None, None]
-
     for i in range(n):
-        img = images[i].cpu().numpy()
-        img = (img * std + mean).clip(0, 1).transpose(1, 2, 0)
-        gt = targets[i].cpu().numpy()
-        pred = preds[i].cpu().numpy()
-
-        axes[i, 0].imshow(img)
+        axes[i, 0].imshow(denormalize(images[i]))
         axes[i, 0].set_title("Image")
-        axes[i, 1].imshow(mask_to_rgb(gt))
+        axes[i, 1].imshow(mask_to_rgb(targets[i].cpu().numpy()))
         axes[i, 1].set_title("Ground truth")
-        axes[i, 2].imshow(mask_to_rgb(pred))
+        axes[i, 2].imshow(mask_to_rgb(preds[i].cpu().numpy()))
         axes[i, 2].set_title("Prediction")
         for ax in axes[i]:
             ax.axis("off")
 
     plt.tight_layout()
+    return fig
+
+
+def example_figure(
+    image: torch.Tensor,
+    target: torch.Tensor,
+    pred: torch.Tensor,
+    class_names: list[str],
+    alpha: float = 0.5,
+    title: str | None = None,
+):
+    """One row: image / ground truth / prediction / overlay, with a class legend."""
+    img = denormalize(image)
+    pred_rgb = mask_to_rgb(pred.cpu().numpy())
+    overlay = (1 - alpha) * img + alpha * pred_rgb / 255.0
+
+    fig, axes = plt.subplots(1, 4, figsize=(24, 3.6))
+    panels = [
+        (img, "Image"),
+        (mask_to_rgb(target.cpu().numpy()), "Ground truth"),
+        (pred_rgb, "Prediction"),
+        (overlay, f"Overlay (α={alpha})"),
+    ]
+    for ax, (data, name) in zip(axes, panels):
+        ax.imshow(data)
+        ax.set_title(name)
+        ax.axis("off")
+
+    handles = [
+        Patch(color=CLASS_COLORS[i] / 255.0, label=name)
+        for i, name in enumerate(class_names) if i > 0
+    ]
+    fig.legend(handles=handles, loc="lower center", ncol=len(handles), frameon=True)
+    if title:
+        fig.suptitle(title)
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
     return fig
