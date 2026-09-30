@@ -16,4 +16,4 @@ def test_different_predictions_pass():
     b[0, 0, 0] = 1
     check_not_stale(a, None)
     check_not_stale(b, a)
-    check_not_stale(a[:1], a)  # last batch can be smaller
+    check_not_stale(a[:1], a)

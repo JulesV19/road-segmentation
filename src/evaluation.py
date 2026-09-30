@@ -5,11 +5,6 @@ from src.metrics import CLASS_NAMES, SegMetric
 
 
 def check_not_stale(pred: torch.Tensor, prev: torch.Tensor | None):
-    """
-    On MPS, a command buffer that runs out of memory only logs an error and the
-    output tensor keeps its previous content. Two different inputs never give a
-    byte-identical argmax map, so treat that as a failed forward pass.
-    """
     if prev is not None and pred.shape == prev.shape and torch.equal(pred, prev):
         raise RuntimeError(
             "identical predictions for two different inputs — a GPU op most likely failed silently "
@@ -19,13 +14,6 @@ def check_not_stale(pred: torch.Tensor, prev: torch.Tensor | None):
 
 @torch.no_grad()
 def evaluate(model, loader, cfg: dict, device: str, criterion=None) -> dict:
-    """
-    Run the model over a full split and return split-level metrics.
-
-    Returns:
-        {"miou": float, "per_class_iou": {name: float}, "pixel_acc": float,
-         "loss": float | None, "num_images": int}
-    """
     model.eval()
     use_amp = cfg["training"].get("mixed_precision", False) and device == "cuda"
     metric = SegMetric(

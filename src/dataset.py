@@ -39,7 +39,7 @@ class CityscapesDataset(Dataset):
     def __getitem__(self, idx: int):
         row = self.df.iloc[idx]
         image = np.array(Image.open(self.root / row["image_path"]).convert("RGB"))
-        mask = np.array(Image.open(self.root / row["mask_path"]))  # uint8, already remapped
+        mask = np.array(Image.open(self.root / row["mask_path"]))
 
         augmented = self.transform(image=image, mask=mask)
         image, mask = augmented["image"], augmented["mask"]

@@ -88,7 +88,6 @@ def train_one_epoch(model, loader, criterion, optimizer, scaler, scheduler, cfg,
 
 
 def append_history(path: Path, row: dict):
-    """One CSV row per epoch."""
     new_file = not path.exists()
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", newline="") as f:

@@ -1,18 +1,3 @@
-"""
-Evaluate a checkpoint on the Cityscapes val split with the standard (dataset-level) mIoU.
-
-Usage:
-    python scripts/evaluate.py \
-        --checkpoint path/to/best.pth \
-        --data_root  path/to/preprocessed \
-        [--output_json results/metrics.json] \
-        [--examples_dir assets/examples --n_examples 8] \
-        [--device cuda|mps|cpu] [--encoder efficientnet-b4] [--skip_eval]
-
-Writes a JSON with the metrics and prints a Markdown table ready for the README.
-Example figures use evenly spaced val indices (not hand-picked).
-"""
-
 import argparse
 import json
 import sys
@@ -129,7 +114,7 @@ def main():
     if args.examples_dir:
         print()
         if device == "mps":
-            torch.mps.empty_cache()  # release the eval batches' memory before the example passes
+            torch.mps.empty_cache()
         save_examples(model, cfg, device, Path(args.examples_dir), args.n_examples)
 
 

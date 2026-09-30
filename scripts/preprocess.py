@@ -1,20 +1,3 @@
-"""
-Run once locally before uploading to Google Drive.
-
-Usage:
-    python scripts/preprocess.py \
-        --data_root "/path/to/cityscapes" \
-        --output_dir "/path/to/preprocessed" \
-        --width 1024 --height 512
-
-Output structure:
-    preprocessed/
-    ├── images/{train,val}/{city}/*.png
-    ├── masks/{train,val}/{city}/*.png
-    ├── train.csv
-    └── val.csv
-"""
-
 import argparse
 import csv
 import os
@@ -25,16 +8,14 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-# Cityscapes label ID → 8-class group
-# 255 = ignore (void, unlabeled, rectification borders, etc.)
 LUT = np.full(256, 255, dtype=np.uint8)
-LUT[[7, 8, 9, 10]] = 1                          # flat
-LUT[[11, 12, 13, 14, 15, 16]] = 2               # construction
-LUT[[17, 18, 19, 20]] = 3                       # object
-LUT[[21, 22]] = 4                               # nature
-LUT[23] = 5                                     # sky
-LUT[[24, 25]] = 6                               # human
-LUT[[26, 27, 28, 29, 30, 31, 32, 33]] = 7      # vehicle
+LUT[[7, 8, 9, 10]] = 1
+LUT[[11, 12, 13, 14, 15, 16]] = 2
+LUT[[17, 18, 19, 20]] = 3
+LUT[[21, 22]] = 4
+LUT[23] = 5
+LUT[[24, 25]] = 6
+LUT[[26, 27, 28, 29, 30, 31, 32, 33]] = 7
 
 CLASS_NAMES = {
     1: "flat", 2: "construction", 3: "object",

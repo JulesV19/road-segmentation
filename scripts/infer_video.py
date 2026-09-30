@@ -1,17 +1,3 @@
-"""
-Local inference on a Cityscapes demo sequence (folder of PNGs).
-
-Usage:
-    python scripts/infer_video.py \
-        --checkpoint path/to/best.pth \
-        --frames_dir path/to/stuttgart_00 \
-        --output     path/to/output.mp4 \
-        [--alpha 0.5] \
-        [--fps 17] \
-        [--no_comparison] \
-        [--device cuda|mps|cpu]
-"""
-
 import argparse
 import sys
 from pathlib import Path

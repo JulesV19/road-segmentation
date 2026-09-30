@@ -1,10 +1,10 @@
 data:
-  root: /content/preprocessed       # override in Colab notebook
+  root: /content/preprocessed
   train_csv: train.csv
   val_csv: val.csv
   num_workers: 4
   pin_memory: true
-  persistent_workers: true          # requires num_workers > 0
+  persistent_workers: true
   infer_width: 1024
   infer_height: 512
 
@@ -16,7 +16,7 @@ model:
 
 training:
   epochs: 50
-  batch_size: 4                     # 4 on A100, 2 on V100/T4 (set by the notebook)
+  batch_size: 4
   lr: 3.0e-4
   weight_decay: 1.0e-4
   grad_clip: 1.0
@@ -26,9 +26,6 @@ training:
   ignore_index: 255
   dice_weight: 0.5
   ce_weight: 0.5
-  # Per-class CE weights [void, flat, construction, object, nature, sky, human, vehicle]
-  # Boosting object (idx 3) and human (idx 6), the weakest classes (0.52 / 0.62 IoU)
-  # in an earlier ResNet34 @ 512x256 run without class weights
   class_weights: [0.0, 1.0, 1.0, 3.0, 1.0, 1.0, 3.0, 1.0]
 
 augmentation:

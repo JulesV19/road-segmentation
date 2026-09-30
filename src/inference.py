@@ -12,7 +12,6 @@ IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 
 def preprocess_frame(frame_bgr: np.ndarray, width: int, height: int) -> torch.Tensor:
-    """BGR frame (H, W, 3) uint8 → normalised tensor (1, 3, H, W)."""
     rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     rgb = cv2.resize(rgb, (width, height), interpolation=cv2.INTER_LINEAR)
     tensor = TF.to_tensor(rgb)
@@ -21,7 +20,6 @@ def preprocess_frame(frame_bgr: np.ndarray, width: int, height: int) -> torch.Te
 
 
 def postprocess_mask(logits: torch.Tensor, orig_w: int, orig_h: int) -> np.ndarray:
-    """Logits (1, C, H, W) → RGB mask (orig_h, orig_w, 3) uint8."""
     pred = logits.argmax(dim=1).squeeze(0).cpu().numpy().astype(np.uint8)
     rgb = np.zeros((*pred.shape, 3), dtype=np.uint8)
     for cls_id, color in enumerate(CLASS_COLORS):
@@ -50,14 +48,6 @@ def run_frames(
     device: str = "cpu",
     comparison: bool = True,
 ):
-    """
-    Read sorted PNG frames from frames_dir, run inference, write MP4.
-
-    Args:
-        comparison: if True, output is side-by-side (original | overlay);
-                    if False, output is overlay only.
-        fps:        output framerate (Cityscapes demo ≈ 17 fps)
-    """
     model.eval()
     width = cfg["data"].get("infer_width", 1024)
     height = cfg["data"].get("infer_height", 512)

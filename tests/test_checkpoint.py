@@ -41,7 +41,7 @@ def test_resume_restores_scheduler_and_early_stopping(tmp_path):
     early2.load_state_dict(ckpt["early_stop"])
 
     assert sched2.get_last_lr() == sched.get_last_lr()
-    assert sched2.last_epoch == 12  # warmup is not restarted
+    assert sched2.last_epoch == 12
     assert early2.counter == 1 and early2.best == 0.8
     assert ckpt["best_miou"] == 0.8
     assert ckpt["cfg"]["model"]["encoder"] == "efficientnet-b4"

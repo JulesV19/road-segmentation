@@ -7,16 +7,15 @@ import numpy as np
 import torch
 from matplotlib.patches import Patch
 
-# RGB palette matching standard Cityscapes category colors
 CLASS_COLORS = np.array([
-    [0,   0,   0],    # void
-    [128, 64,  128],  # flat
-    [70,  70,  70],   # construction
-    [153, 153, 153],  # object
-    [107, 142, 35],   # nature
-    [70,  130, 180],  # sky
-    [220, 20,  60],   # human
-    [0,   0,   142],  # vehicle
+    [0,   0,   0],
+    [128, 64,  128],
+    [70,  70,  70],
+    [153, 153, 153],
+    [107, 142, 35],
+    [70,  130, 180],
+    [220, 20,  60],
+    [0,   0,   142],
 ], dtype=np.uint8)
 
 IGNORE_COLOR = np.array([0, 0, 0], dtype=np.uint8)
@@ -26,15 +25,11 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
 def mask_to_rgb(mask: np.ndarray) -> np.ndarray:
-    """Convert (H, W) label mask to (H, W, 3) RGB image."""
-    # index 255 (ignore) is mapped to an extra last row
     lut = np.vstack([CLASS_COLORS, IGNORE_COLOR])
     safe = np.where(mask == 255, len(CLASS_COLORS), mask).astype(np.int32)
     return lut[safe].astype(np.uint8)
 
 
-# Background copy to Drive; joined before the next save so a copy never reads
-# a file that is being rewritten.
 _copy_thread: threading.Thread | None = None
 
 
@@ -46,7 +41,6 @@ def wait_for_checkpoint_copies():
 
 
 def save_checkpoint(state: dict, path: str | Path, drive_paths: list[str | Path] = ()):
-    """Save `state` to `path` (fast local disk), then copy it to each of `drive_paths` in the background."""
     global _copy_thread
     wait_for_checkpoint_copies()
 
@@ -72,7 +66,6 @@ def load_checkpoint(
     scaler: torch.amp.GradScaler | None = None,
     device: str = "cuda",
 ) -> dict:
-    """Load weights (and optionally optimizer / scheduler / scaler state). Returns the raw checkpoint dict."""
     ckpt = torch.load(path, map_location=device)
     model.load_state_dict(ckpt["model"])
     if optimizer is not None and "optimizer" in ckpt:
@@ -88,7 +81,6 @@ def load_checkpoint(
 
 
 def denormalize(image: torch.Tensor, mean=IMAGENET_MEAN, std=IMAGENET_STD) -> np.ndarray:
-    """(3, H, W) normalised tensor → (H, W, 3) float image in [0, 1]."""
     img = image.cpu().numpy()
     img = img * np.array(std)[:, None, None] + np.array(mean)[:, None, None]
     return img.clip(0, 1).transpose(1, 2, 0)
@@ -100,7 +92,6 @@ def visualize_predictions(
     preds: torch.Tensor,
     n: int = 4,
 ):
-    """Display a grid of image / GT / prediction triplets."""
     n = min(n, images.shape[0])
     fig, axes = plt.subplots(n, 3, figsize=(18, 3 * n))
     if n == 1:
@@ -128,7 +119,6 @@ def example_figure(
     alpha: float = 0.5,
     title: str | None = None,
 ):
-    """One row: image / ground truth / prediction / overlay, with a class legend."""
     img = denormalize(image)
     pred_rgb = mask_to_rgb(pred.cpu().numpy())
     overlay = (1 - alpha) * img + alpha * pred_rgb / 255.0
