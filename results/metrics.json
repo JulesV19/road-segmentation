@@ -1,0 +1,31 @@
+{
+  "miou": 0.8862788216711753,
+  "per_class_iou": {
+    "flat": 0.9850427639721232,
+    "construction": 0.9214165248424475,
+    "object": 0.6965389080398968,
+    "nature": 0.9195593830678819,
+    "sky": 0.9432889003585583,
+    "human": 0.8107772412366606,
+    "vehicle": 0.9273280301806579
+  },
+  "pixel_acc": 0.9698498149865726,
+  "loss": null,
+  "num_images": 500,
+  "per_city": {
+    "frankfurt": {
+      "miou": 0.8805140002431369,
+      "num_images": 267
+    },
+    "lindau": {
+      "miou": 0.8785180515345472,
+      "num_images": 59
+    },
+    "munster": {
+      "miou": 0.8940894074805686,
+      "num_images": 174
+    }
+  },
+  "checkpoint": "best_epoch049_miou0.8419.pth",
+  "epoch": 49
+}
