@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from src.evaluation import evaluate
 
-CFG = {"model": {"num_classes": 3}, "training": {"ignore_index": 255}}
+CFG = {"model": {"num_classes": 3}, "training": {"ignore_index": 255, "mixed_precision": False}}
 
 
 def test_per_city_matches_hand_computed_iou():
@@ -22,7 +22,6 @@ def test_per_city_matches_hand_computed_iou():
 
     results = evaluate(torch.nn.Identity(), loader, CFG, "cpu", cities=["a", "a", "b"])
 
-    assert results["per_city"]["a"]["num_images"] == 2
-    assert results["per_city"]["a"]["per_class_iou"] == {"flat": 3 / 4, "construction": 4 / 5}
-    assert results["per_city"]["b"]["per_class_iou"] == {"flat": 1 / 3, "construction": 1 / 3}
+    assert results["per_city"]["a"] == {"miou": (3 / 4 + 4 / 5) / 2, "num_images": 2}
+    assert results["per_city"]["b"] == {"miou": 1 / 3, "num_images": 1}
     assert "per_city" not in evaluate(torch.nn.Identity(), loader, CFG, "cpu")

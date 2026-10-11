@@ -8,30 +8,21 @@ import torchvision.transforms.functional as TF
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 
+from src.utils import IMAGENET_MEAN, IMAGENET_STD
 
-def build_transforms(cfg, split: str) -> A.Compose:
-    aug = cfg["augmentation"]
-    if split == "train":
-        transforms = [A.HorizontalFlip(p=aug["random_hflip_p"])]
-        if aug.get("color_jitter"):
-            transforms.append(
-                A.ColorJitter(
-                    brightness=aug["color_jitter_brightness"],
-                    contrast=aug["color_jitter_contrast"],
-                    saturation=aug["color_jitter_saturation"],
-                    hue=aug["color_jitter_hue"],
-                    p=0.5,
-                )
-            )
-        return A.Compose(transforms)
-    return A.Compose([])
+
+def train_transform(aug: dict) -> A.Compose:
+    return A.Compose([
+        A.HorizontalFlip(p=aug["hflip_p"]),
+        A.ColorJitter(**aug["color_jitter"], p=0.5),
+    ])
 
 
 class CityscapesDataset(Dataset):
-    def __init__(self, root: str, csv_file: str, split: str = "train", cfg: dict = None):
+    def __init__(self, root: str, csv_file: str, transform: A.Compose | None = None):
         self.root = Path(root)
         self.df = pd.read_csv(self.root / csv_file)
-        self.transform = build_transforms(cfg, split) if cfg else A.Compose([])
+        self.transform = transform
 
     def __len__(self) -> int:
         return len(self.df)
@@ -41,42 +32,25 @@ class CityscapesDataset(Dataset):
         image = np.array(Image.open(self.root / row["image_path"]).convert("RGB"))
         mask = np.array(Image.open(self.root / row["mask_path"]))
 
-        augmented = self.transform(image=image, mask=mask)
-        image, mask = augmented["image"], augmented["mask"]
+        if self.transform:
+            out = self.transform(image=image, mask=mask)
+            image, mask = out["image"], out["mask"]
 
-        image = TF.to_tensor(image)
-        image = TF.normalize(image, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        mask = torch.from_numpy(mask).long()
-        return image, mask
+        image = TF.normalize(TF.to_tensor(image), IMAGENET_MEAN, IMAGENET_STD)
+        return image, torch.from_numpy(mask).long()
 
 
 def build_loaders(cfg: dict):
-    data_cfg = cfg["data"]
-    train_ds = CityscapesDataset(
-        data_cfg["root"], data_cfg["train_csv"], split="train", cfg=cfg
-    )
-    val_ds = CityscapesDataset(
-        data_cfg["root"], data_cfg["val_csv"], split="val", cfg=cfg
-    )
+    data = cfg["data"]
+    train_ds = CityscapesDataset(data["root"], data["train_csv"], train_transform(cfg["augmentation"]))
+    val_ds = CityscapesDataset(data["root"], data["val_csv"])
 
-    num_workers = data_cfg["num_workers"]
-    loader_kwargs = dict(
-        num_workers=num_workers,
-        pin_memory=data_cfg["pin_memory"],
-        persistent_workers=(num_workers > 0 and data_cfg.get("persistent_workers", True)),
-    )
-
-    train_loader = DataLoader(
-        train_ds,
+    kwargs = dict(
         batch_size=cfg["training"]["batch_size"],
-        shuffle=True,
-        drop_last=True,
-        **loader_kwargs,
+        num_workers=data["num_workers"],
+        pin_memory=torch.cuda.is_available(),
+        persistent_workers=data["num_workers"] > 0,
     )
-    val_loader = DataLoader(
-        val_ds,
-        batch_size=cfg["training"]["batch_size"],
-        shuffle=False,
-        **loader_kwargs,
-    )
+    train_loader = DataLoader(train_ds, shuffle=True, drop_last=True, **kwargs)
+    val_loader = DataLoader(val_ds, shuffle=False, **kwargs)
     return train_loader, val_loader

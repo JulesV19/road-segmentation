@@ -1,76 +1,51 @@
-import copy
 import csv
+import math
+import shutil
 from pathlib import Path
 
 import segmentation_models_pytorch as smp
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-from transformers import get_cosine_schedule_with_warmup
 
 from src.dataset import build_loaders
 from src.evaluation import evaluate
 from src.metrics import CLASS_NAMES
 from src.model import build_model
-from src.utils import load_checkpoint, save_checkpoint, wait_for_checkpoint_copies
-
-
-class EarlyStopping:
-    def __init__(self, patience: int):
-        self.patience = patience
-        self.counter = 0
-        self.best = None
-
-    def step(self, metric: float) -> bool:
-        if self.best is None or metric > self.best:
-            self.best = metric
-            self.counter = 0
-            return False
-        self.counter += 1
-        return self.counter >= self.patience
-
-    def state_dict(self) -> dict:
-        return {"counter": self.counter, "best": self.best}
-
-    def load_state_dict(self, state: dict):
-        self.counter = state["counter"]
-        self.best = state["best"]
 
 
 def build_criterion(cfg: dict, device: str):
-    ignore_index = cfg["training"]["ignore_index"]
-
-    class_weights = cfg["training"].get("class_weights")
-    weight_tensor = (
-        torch.tensor(class_weights, dtype=torch.float32).to(device)
-        if class_weights else None
-    )
-
-    ce = nn.CrossEntropyLoss(ignore_index=ignore_index, weight=weight_tensor)
-    dice = smp.losses.DiceLoss(mode="multiclass", ignore_index=ignore_index)
-    w_ce = cfg["training"]["ce_weight"]
-    w_dice = cfg["training"]["dice_weight"]
+    t = cfg["training"]
+    weights = torch.tensor(t["class_weights"], dtype=torch.float32, device=device)
+    ce = nn.CrossEntropyLoss(weight=weights, ignore_index=t["ignore_index"])
+    dice = smp.losses.DiceLoss(mode="multiclass", ignore_index=t["ignore_index"])
 
     def criterion(logits, targets):
-        return w_ce * ce(logits, targets) + w_dice * dice(logits, targets)
+        return t["ce_weight"] * ce(logits, targets) + t["dice_weight"] * dice(logits, targets)
 
     return criterion
+
+
+def build_scheduler(optimizer, warmup_steps: int, total_steps: int):
+    def lr_factor(step):
+        if step < warmup_steps:
+            return step / warmup_steps  # linear warmup
+        progress = (step - warmup_steps) / (total_steps - warmup_steps)
+        return 0.5 * (1 + math.cos(math.pi * progress))  # cosine decay to 0
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_factor)
 
 
 def train_one_epoch(model, loader, criterion, optimizer, scaler, scheduler, cfg, device):
     model.train()
     total_loss = 0.0
-    log_every = cfg["logging"]["log_every_n_steps"]
-    use_amp = cfg["training"]["mixed_precision"]
-
     pbar = tqdm(loader, desc="  train", leave=False)
     for step, (images, masks) in enumerate(pbar):
         images, masks = images.to(device), masks.to(device)
 
         optimizer.zero_grad()
-        with torch.amp.autocast("cuda", enabled=use_amp):
-            logits = model(images)
-            loss = criterion(logits, masks)
+        with torch.amp.autocast("cuda", enabled=cfg["training"]["mixed_precision"]):
+            loss = criterion(model(images), masks)
 
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
@@ -80,18 +55,15 @@ def train_one_epoch(model, loader, criterion, optimizer, scaler, scheduler, cfg,
         scheduler.step()
 
         total_loss += loss.item()
-        if (step + 1) % log_every == 0:
-            avg = total_loss / (step + 1)
-            pbar.set_postfix(loss=f"{avg:.4f}", lr=f"{scheduler.get_last_lr()[0]:.2e}")
+        pbar.set_postfix(loss=f"{total_loss / (step + 1):.4f}")
 
     return total_loss / len(loader)
 
 
 def append_history(path: Path, row: dict):
     new_file = not path.exists()
-    path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+        writer = csv.DictWriter(f, fieldnames=list(row))
         if new_file:
             writer.writeheader()
         writer.writerow(row)
@@ -99,84 +71,52 @@ def append_history(path: Path, row: dict):
 
 def train(cfg: dict, resume_from: str | None = None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Device: {device}")
+    t = cfg["training"]
 
     train_loader, val_loader = build_loaders(cfg)
     model = build_model(cfg).to(device)
     criterion = build_criterion(cfg, device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=t["lr"], weight_decay=t["weight_decay"])
+    steps_per_epoch = len(train_loader)
+    scheduler = build_scheduler(optimizer, t["warmup_epochs"] * steps_per_epoch, t["epochs"] * steps_per_epoch)
+    scaler = torch.amp.GradScaler("cuda", enabled=t["mixed_precision"])
 
-    t_cfg = cfg["training"]
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=t_cfg["lr"], weight_decay=t_cfg["weight_decay"]
-    )
-    total_steps = t_cfg["epochs"] * len(train_loader)
-    warmup_steps = t_cfg["warmup_epochs"] * len(train_loader)
-    scheduler = get_cosine_schedule_with_warmup(
-        optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
-    )
-    scaler = torch.amp.GradScaler("cuda", enabled=t_cfg["mixed_precision"])
-    early_stop = EarlyStopping(patience=t_cfg["early_stop_patience"])
-
-    start_epoch = 0
-    best_miou = 0.0
     ckpt_dir = Path(cfg["checkpointing"]["dir"])
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    history_path = ckpt_dir / "history.csv"
+    start_epoch, best_miou = 0, 0.0
 
     if resume_from:
-        print(f"Resuming from {resume_from}")
-        ckpt = load_checkpoint(resume_from, model, optimizer, scheduler, scaler, device)
-        start_epoch = ckpt.get("epoch", 0) + 1
-        best_miou = ckpt.get("best_miou", 0.0)
-        if "early_stop" in ckpt:
-            early_stop.load_state_dict(ckpt["early_stop"])
+        ckpt = torch.load(resume_from, map_location=device)
+        for name, obj in [("model", model), ("optimizer", optimizer), ("scheduler", scheduler), ("scaler", scaler)]:
+            obj.load_state_dict(ckpt[name])
+        start_epoch, best_miou = ckpt["epoch"] + 1, ckpt["best_miou"]
 
-    for epoch in range(start_epoch, t_cfg["epochs"]):
-        print(f"\nEpoch {epoch + 1}/{t_cfg['epochs']} — best mIoU so far: {best_miou:.4f}")
-
-        train_loss = train_one_epoch(
-            model, train_loader, criterion, optimizer, scaler, scheduler, cfg, device
-        )
+    for epoch in range(start_epoch, t["epochs"]):
+        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, scaler, scheduler, cfg, device)
         val = evaluate(model, val_loader, cfg, device, criterion=criterion)
-        val_miou = val["miou"]
+        is_best = val["miou"] > best_miou
+        best_miou = max(best_miou, val["miou"])
+        print(f"Epoch {epoch + 1}/{t['epochs']}  train_loss={train_loss:.4f}  "
+              f"val_loss={val['loss']:.4f}  val_mIoU={val['miou']:.4f}{'  (best)' if is_best else ''}")
 
-        print(f"  train_loss={train_loss:.4f}  val_loss={val['loss']:.4f}  val_mIoU={val_miou:.4f}")
-
-        is_best = val_miou > best_miou
-        if is_best:
-            best_miou = val_miou
-        stop = early_stop.step(val_miou)
-
-        append_history(history_path, {
+        append_history(ckpt_dir / "history.csv", {
             "epoch": epoch + 1,
-            "lr": scheduler.get_last_lr()[0],
             "train_loss": train_loss,
             "val_loss": val["loss"],
-            "val_miou": val_miou,
+            "val_miou": val["miou"],
             **{f"iou_{name}": val["per_class_iou"][name] for name in CLASS_NAMES[1:]},
         })
 
-        state = {
+        torch.save({
             "epoch": epoch,
             "model": model.state_dict(),
             "optimizer": optimizer.state_dict(),
             "scheduler": scheduler.state_dict(),
             "scaler": scaler.state_dict(),
-            "early_stop": early_stop.state_dict(),
             "best_miou": best_miou,
-            "val_miou": val_miou,
-            "val_per_class_iou": val["per_class_iou"],
-            "cfg": copy.deepcopy(cfg),
-        }
-        drive_paths = [ckpt_dir / "last.pth"] + ([ckpt_dir / "best.pth"] if is_best else [])
-        save_checkpoint(state, Path("/tmp/last.pth"), drive_paths=drive_paths)
+        }, ckpt_dir / "last.pth")
         if is_best:
-            print(f"  *** New best mIoU: {best_miou:.4f} — checkpoint saved ***")
+            shutil.copy(ckpt_dir / "last.pth", ckpt_dir / "best.pth")
 
-        if stop:
-            print(f"  Early stopping triggered after {epoch + 1} epochs.")
-            break
-
-    wait_for_checkpoint_copies()
-    print(f"\nTraining complete. Best val mIoU: {best_miou:.4f}")
+    print(f"Training complete. Best val mIoU: {best_miou:.4f}")
     return model

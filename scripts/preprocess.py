@@ -1,6 +1,5 @@
 import argparse
 import csv
-import os
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
 
@@ -8,19 +7,15 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
+# Cityscapes label id -> category id; everything else (void) -> 255, ignored
 LUT = np.full(256, 255, dtype=np.uint8)
-LUT[[7, 8, 9, 10]] = 1
-LUT[[11, 12, 13, 14, 15, 16]] = 2
-LUT[[17, 18, 19, 20]] = 3
-LUT[[21, 22]] = 4
-LUT[23] = 5
-LUT[[24, 25]] = 6
-LUT[[26, 27, 28, 29, 30, 31, 32, 33]] = 7
-
-CLASS_NAMES = {
-    1: "flat", 2: "construction", 3: "object",
-    4: "nature", 5: "sky", 6: "human", 7: "vehicle",
-}
+LUT[[7, 8, 9, 10]] = 1                      # flat: road, sidewalk, parking, rail track
+LUT[[11, 12, 13, 14, 15, 16]] = 2           # construction: building, wall, fence, guard rail, bridge, tunnel
+LUT[[17, 18, 19, 20]] = 3                   # object: pole, polegroup, traffic light, traffic sign
+LUT[[21, 22]] = 4                           # nature: vegetation, terrain
+LUT[23] = 5                                 # sky
+LUT[[24, 25]] = 6                           # human: person, rider
+LUT[[26, 27, 28, 29, 30, 31, 32, 33]] = 7   # vehicle: car, truck, bus, caravan, trailer, train, motorcycle, bicycle
 
 
 def process_sample(args):
@@ -106,10 +101,6 @@ def main():
             writer.writeheader()
             writer.writerows(csv_rows)
         print(f"  Manifest saved: {csv_path}")
-
-    print("\nDone. Verify class distribution with:")
-    print("  python -c \"import numpy as np; from PIL import Image; "
-          "m=np.array(Image.open('<any_mask>')); print(np.unique(m, return_counts=True))\"")
 
 
 if __name__ == "__main__":

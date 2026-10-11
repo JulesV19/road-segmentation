@@ -2,59 +2,28 @@ import argparse
 import sys
 from pathlib import Path
 
-import torch
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.inference import run_frames
-from src.model import load_model_for_inference
-
-
-def auto_device() -> str:
-    if torch.cuda.is_available():
-        return "cuda"
-    if torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
+from src.model import load_model
+from src.utils import auto_device
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint",    required=True)
-    parser.add_argument("--frames_dir",    required=True, help="Folder containing sorted PNG frames")
-    parser.add_argument("--output",        required=True, help="Output .mp4 path")
-    parser.add_argument("--config",        default="configs/config.yaml")
-    parser.add_argument("--alpha",         type=float, default=0.5)
-    parser.add_argument("--fps",           type=float, default=17.0)
-    parser.add_argument("--no_comparison", action="store_true",
-                        help="Output overlay only instead of side-by-side")
-    parser.add_argument("--device",        default=None)
-    parser.add_argument("--encoder",       default=None,
-                        help="Override encoder (only needed for old checkpoints that do not embed their config)")
+    parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--frames_dir", required=True, help="Folder of PNG frames, sorted by name")
+    parser.add_argument("--output",     required=True, help="Output .mp4 path")
+    parser.add_argument("--config",     default="configs/config.yaml")
     args = parser.parse_args()
-
-    device = args.device or auto_device()
-    print(f"Device: {device}")
 
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
-
-    if device != "cuda":
-        cfg["training"]["mixed_precision"] = False
-
-    model, _ = load_model_for_inference(args.checkpoint, cfg, device, encoder=args.encoder)
-
-    run_frames(
-        model,
-        frames_dir=args.frames_dir,
-        output_path=args.output,
-        cfg=cfg,
-        alpha=args.alpha,
-        fps=args.fps,
-        device=device,
-        comparison=not args.no_comparison,
-    )
+    device = auto_device()
+    model, _ = load_model(args.checkpoint, cfg, device)
+    run_frames(model, args.frames_dir, args.output, cfg, device)
 
 
 if __name__ == "__main__":
