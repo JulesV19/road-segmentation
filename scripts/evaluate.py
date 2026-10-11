@@ -32,6 +32,12 @@ def markdown_table(results: dict) -> str:
     rows = ["| Class | IoU |", "|---|---|"]
     rows += [f"| {name} | {iou:.3f} |" for name, iou in results["per_class_iou"].items()]
     rows.append(f"| **mean** | **{results['miou']:.3f}** |")
+    if "per_city" in results:
+        rows += ["", "| City | Images | mIoU |", "|---|---|---|"]
+        rows += [
+            f"| {city} | {r['num_images']} | {r['miou']:.3f} |"
+            for city, r in results["per_city"].items()
+        ]
     return "\n".join(rows)
 
 
@@ -92,7 +98,8 @@ def main():
 
     _, val_loader = build_loaders(cfg)
 
-    results = evaluate(model, val_loader, cfg, device)
+    cities = [Path(p).parent.name for p in val_loader.dataset.df["image_path"]]
+    results = evaluate(model, val_loader, cfg, device, cities=cities)
     first_image = val_loader.dataset.root / val_loader.dataset.df.iloc[0]["image_path"]
     width, height = Image.open(first_image).size
     results.update({

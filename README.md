@@ -41,7 +41,7 @@ Semantic segmentation of urban driving scenes. UNet + EfficientNet-B4 encoder tr
 | vehicle | 0.928 |
 | **mean** | **0.886** |
 
-Pixel accuracy 0.970 · 500 val images · EfficientNet-B4 · 1024×512 · trained 50 epochs, checkpoint from epoch 49 (best val score) · Colab A100 · raw output in [`results/metrics.json`](results/metrics.json)
+Pixel accuracy 0.970 · 500 val images · EfficientNet-B4 · 1024×512 · trained 50 epochs, checkpoint from epoch 49 (best val score) · Colab L4, batch size 2 · raw output in [`results/metrics.json`](results/metrics.json)
 
 ### How the metric is computed
 
