@@ -53,8 +53,6 @@ Pixel accuracy 0.970 · 500 val images · EfficientNet-B4 · 1024×512 · traine
 
 - **Dataset-level mIoU**: one confusion matrix is accumulated over all 500 val images, then IoU = TP / (TP + FP + FN) per class, averaged over the 7 categories (`src/metrics.py`).
 - Pixels labelled *void* in the ground truth (ego vehicle, rectification border, …) are ignored.
-- **Not the official category benchmark protocol**: the official evaluation runs at full resolution (2048×1024) and ignores 8 rare classes (parking, rail track, guard rail, bridge, tunnel, pole group, caravan, trailer), whereas here they are merged into their category (`scripts/preprocess.py`).
-- Per-epoch training log: [`results/training_log.csv`](results/training_log.csv). Its `val_miou_batch_avg` column comes from an earlier version of the metric (mean of per-batch mIoUs, 0.842 at epoch 49), which underweights rare classes; re-evaluated with the dataset-level metric above, the same checkpoint scores 0.886.
 
 ---
 
